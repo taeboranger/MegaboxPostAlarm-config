@@ -3,6 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: megabox-monitor-data
 spec:
+  storageClassName: local-path
   accessModes: [ReadWriteOnce]
   resources:
     requests:
