@@ -1,0 +1,97 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: megabox-monitor-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: megabox-monitor
+spec:
+  replicas: 1
+  # SQLite state and polling must have a single writer, including during rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: megabox-monitor
+  template:
+    metadata:
+      labels:
+        app: megabox-monitor
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: monitor
+          # Replace with your pushed image (amd64/arm64 must match the home server).
+          image: lightstone1/megabox-post-alarm-prod:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: health
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: health
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: health
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 15
+          volumeMounts:
+            - name: state
+              mountPath: /data
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: config
+              mountPath: /app/config.json
+              subPath: config.json
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: megabox-monitor-data
+        - name: secrets
+          secret:
+            secretName: megabox-monitor-fcm
+            defaultMode: 0440
+        - name: config
+          configMap:
+            name: megabox-monitor-config
+        - name: tmp
+          emptyDir: {}
